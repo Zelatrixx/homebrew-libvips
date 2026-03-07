@@ -16,7 +16,7 @@ class LibheifAT1212 < Formula
   depends_on "webp"
   depends_on "x265"
   depends_on "dav1d"
-  depends_on "my/tap/svt-av1@3.1.2"
+  depends_on "Zelatrixx/libvips/svt-av1@3.1.2"
 
   def install
     args = %W[
