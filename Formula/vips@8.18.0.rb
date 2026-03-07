@@ -27,7 +27,7 @@ class VipsAT8180 < Formula
   depends_on "jpeg-xl"
   depends_on "libarchive"
   depends_on "libexif"
-  depends_on "my/tap/libheif@1.21.2"
+  depends_on "Zelatrixx/libvips/libheif@1.21.2"
   depends_on "libimagequant"
   depends_on "libmatio"
   depends_on "libpng"
