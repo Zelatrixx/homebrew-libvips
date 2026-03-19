@@ -16,7 +16,12 @@ class LibheifAT1212 < Formula
   depends_on "webp"
   depends_on "x265"
   depends_on "dav1d"
-  depends_on "Zelatrixx/libvips/svt-av1@3.1.2"
+  depends_on "Zelatrixx/libvips/svt-av1@4.0.1"
+
+  patch do
+    url "https://www.linuxfromscratch.org/patches/blfs/svn/libheif-1.21.2-svt_av1_build_fix-1.patch"
+    sha256 "PUT_REAL_SHA256_HERE"
+  end
 
   def install
     args = %W[
