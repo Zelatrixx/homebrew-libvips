@@ -1,0 +1,109 @@
+--- a/libheif/plugins/encoder_svt.cc
++++ b/libheif/plugins/encoder_svt.cc
+@@ -829,7 +829,16 @@
+   svt_config.tile_columns = int_log2(encoder->tile_cols);
+ 
+ #if SVT_AV1_CHECK_VERSION(0, 9, 1)
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++  // SVT-AV1 4.x rejects SSIM tune together with libheif's CQP-style setup.
++  // Fall back silently to PSNR to avoid encoder failure.
++  svt_config.tune =
++      (encoder->tune == encoder_struct_svt::Tune_SSIM)
++          ? encoder_struct_svt::Tune_PSNR
++          : encoder->tune;
++#else
+   svt_config.tune = encoder->tune;
++#endif
+ #endif
+ 
+   svt_config.enc_mode = (int8_t) encoder->speed;
+@@ -838,8 +847,18 @@
+     // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
+ 
+ #if 1
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++    switch (options->gop_structure) {
++      case heif_sequence_gop_structure_intra_only:
++        break;
++      case heif_sequence_gop_structure_lowdelay:
++        break;
++      case heif_sequence_gop_structure_unrestricted:
++        svt_config.pred_structure = 2; // RANDOM_ACCESS in SVT 4.x API
++        break;
++    }
++#else
+     // TODO: setting pref_structure to SVT_AV1_PRED_LOW_DELAY_B hangs the encoder
+-
+     switch (options->gop_structure) {
+       case heif_sequence_gop_structure_intra_only:
+         //svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
+@@ -851,6 +870,7 @@
+         svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_RANDOM_ACCESS;
+         break;
+     }
++#endif
+ 
+     if (options->keyframe_distance_max) {
+       svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
+@@ -858,9 +878,21 @@
+ #endif
+   }
+   else {
+-    // TODO: enable when https://gitlab.com/AOMediaCodec/SVT-AV1/-/issues/2245 is resolved
+-    // svt_config.avif = true;
+-    // encoder->still_image_mode = true;
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++    // Proper still-image AVIF path for SVT-AV1 4.x.
++    // Use AVIF mode and a single-picture all-intra configuration.
++    // Prefer RANDOM_ACCESS instead of LOW_DELAY to avoid leading TD OBU
++    // in the output bitstream for still images.
++    svt_config.avif = true;
++    encoder->still_image_mode = true;
++
++    svt_config.pred_structure = 2;      // RANDOM_ACCESS
++    svt_config.hierarchical_levels = 0; // no mini-GOP pyramid
++    svt_config.intra_period_length = -1;
++
++    framerate_num = 1;
++    framerate_denom = 1;
++#endif
+   }
+ 
+   if (color_format == EB_YUV422 || bitdepth_y > 10) {
+@@ -912,15 +944,33 @@
+         output_packet.frameNr = output_buf->pts;
+         output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
+ 
++        uint8_t* payload = data;
++        uint32_t payload_size = n;
++
++        // Safety net:
++        // if SVT still emits a leading Temporal Delimiter OBU, strip it.
++        // AVIF image items must not contain TD OBU.
++        if (payload_size >= 2) {
++          uint8_t obu_type = (payload[0] >> 3) & 0x0F;
++          uint8_t has_size_field = (payload[0] >> 1) & 0x01;
++
++          // Strip only the simple TD pattern:
++          // 1-byte header + 1-byte leb128 size field with size 0.
++          if (obu_type == 2 && has_size_field == 1 && payload[1] == 0x00) {
++            payload += 2;
++            payload_size -= 2;
++          }
++        }
++
+         encoder->output_packets.emplace_back(output_packet);
+-        encoder->output_packets.back().compressedData.resize(n);
++        encoder->output_packets.back().compressedData.resize(payload_size);
+ 
+         memcpy(encoder->output_packets.back().compressedData.data(),
+-               data, n);
++               payload, payload_size);
+ 
+         /* TODO: this is a hack
+          * When using
+-         *           svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
++         *           svt_config.pred_structure = 1; // LOW_DELAY in old API
+          * svt_av1_enc_get_packet() hangs on the second call. As a workaround, we can leave the
+          * loop when we got the image:
+          */
