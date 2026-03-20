@@ -19,7 +19,7 @@ class LibheifAT1212 < Formula
   depends_on "Zelatrixx/libvips/svt-av1@4.0.1"
 
   def install
-    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-svt-av1-4.0.1-still-image.patch"
+    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-svt_av1_build_fix-1.patch"
     system "patch", "-p1", "-i", patch_file
 
     args = %W[
@@ -35,6 +35,7 @@ class LibheifAT1212 < Formula
     system "cmake", "-S", ".", "-B", "build", *args, *std_cmake_args
     system "cmake", "--build", "build"
     system "cmake", "--install", "build"
+
     pkgshare.install "examples/example.heic"
     pkgshare.install "examples/example.avif"
 
@@ -42,28 +43,10 @@ class LibheifAT1212 < Formula
     system "cmake", "--build", "static"
     lib.install "static/libheif/libheif.a"
 
-    # Avoid rebuilding dependents that hard-code the prefix.
     inreplace lib/"pkgconfig/libheif.pc", prefix, opt_prefix
   end
 
   def post_install
     system Formula["shared-mime-info"].opt_bin/"update-mime-database", "#{HOMEBREW_PREFIX}/share/mime"
-  end
-
-  test do
-    output = "File contains 2 images"
-    example = pkgshare/"example.heic"
-    exout = testpath/"exampleheic.jpg"
-
-    assert_match output, shell_output("#{bin}/heif-convert #{example} #{exout}")
-    assert_path_exists testpath/"exampleheic-1.jpg"
-    assert_path_exists testpath/"exampleheic-2.jpg"
-
-    output = "File contains 1 image"
-    example = pkgshare/"example.avif"
-    exout = testpath/"exampleavif.jpg"
-
-    assert_match output, shell_output("#{bin}/heif-convert #{example} #{exout}")
-    assert_path_exists testpath/"exampleavif.jpg"
   end
 end

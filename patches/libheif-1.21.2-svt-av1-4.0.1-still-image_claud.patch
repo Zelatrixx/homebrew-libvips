@@ -1,0 +1,34 @@
+Submitted By:            still-image addendum (apply after svt_av1_build_fix-1.patch)
+Date:                    2025-03-20
+Initial Package Version: 1.21.2
+Origin:                  Fix based on libheif issue #1636 and SVT-AV1 issue #2245
+Upstream Status:         Not submitted (see https://github.com/strukturag/libheif/issues/1636)
+Description:             Enables SVT-AV1 avif=1 mode for still image encoding.
+                         The flag was already present in the source but blocked behind
+                         a TODO referencing SVT-AV1 issue #2245, which is resolved
+                         since SVT-AV1 3.0.0.
+                         Effect: reduced memory usage, intra-only structure, no video
+                         GOP — produces valid AVIF still images that Firefox accepts.
+                         Apply this patch AFTER svt_av1_build_fix-1.patch.
+
+diff -u libheif-1.21.2/libheif/plugins/encoder_svt.cc.orig libheif-1.21.2/libheif/plugins/encoder_svt.cc
+--- libheif-1.21.2/libheif/plugins/encoder_svt.cc.orig
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc
+@@ -858,9 +858,14 @@
+ #endif
+   }
+   else {
+-    // TODO: enable when https://gitlab.com/AOMediaCodec/SVT-AV1/-/issues/2245 is resolved
+-    // svt_config.avif = true;
+-    // encoder->still_image_mode = true;
++    // Issue #2245 is resolved in SVT-AV1 >= 3.0.0.
++    // avif=1 activates still image optimizations: reduced parallel picture sets,
++    // intra-only structure, and lower memory usage. This is the correct mode for
++    // single still images and fixes Firefox rejecting the output (missing mif1/pixi).
++#if SVT_AV1_CHECK_VERSION(3, 0, 0)
++    svt_config.avif = true;
++    encoder->still_image_mode = true;
++#endif
+   }
+ 
+   if (color_format == EB_YUV422 || bitdepth_y > 10) {
