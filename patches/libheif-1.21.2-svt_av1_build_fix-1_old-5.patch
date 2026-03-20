@@ -1,25 +1,21 @@
-Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix
+Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix + TD OBU fix
 Date:                    2026-03-20
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + still image parameters + SSIM/CQP fix
+Origin:                  Upstream (PR #1680) + three additional fixes
 Description:             Fixes building libheif with SVT-AV1 4.0 and later.
-                         Two changes on top of the original build fix:
-                         1. Still image mode: pred_structure=2 (random_access),
-                            hierarchical_levels=0, intra_period_length=-1, fps=1/1.
-                            Uses random_access instead of low_delay because low_delay
-                            prepends a Temporal Delimiter OBU — with TD OBU Firefox
-                            accepts the file, but without TD OBU (after stripping)
-                            Firefox rejects it. random_access with intra_period_length=-1
-                            produces still_picture=1/reduced_still_picture_header=1
-                            in the sequence header without generating TD OBU at all.
-                         2. tune=SSIM fallback to PSNR under CQP mode: SVT-AV1 4.0.1
-                            requires CRF for SSIM but libheif uses CQP. Sharp passes
-                            tune=ssim by default for .heif() calls which crashes the
-                            encoder. Fall back silently to PSNR instead.
+                         Three changes on top of the original build fix:
+                         1. Still image mode: pred_structure=1, hierarchical_levels=0,
+                            intra_period_length=-1, fps=1/1.
+                         2. tune=SSIM fallback to PSNR under CQP mode (SVT-AV1 4.0.1
+                            requires CRF for SSIM, crashes otherwise).
+                         3. Strip Temporal Delimiter OBU from output bitstream.
+                            AVIF spec ISO 23000-22 §2.1 forbids TD OBUs in image items.
+                            SVT-AV1 in low-delay mode prepends one; Firefox 136+
+                            strictly rejects such files with "image contains errors".
 
---- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 15:57:01.435677687 +0000
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 15:57:21.500672953 +0000
+--- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 15:10:18.737302366 +0000
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 15:10:35.470295843 +0000
 @@ -829,8 +829,16 @@ static heif_error svt_start_sequence_enc
    svt_config.tile_columns = int_log2(encoder->tile_cols);
  
@@ -67,7 +63,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +879,19 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +879,15 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -77,20 +73,35 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
 +#if SVT_AV1_CHECK_VERSION(4, 0, 0)
 +    svt_config.avif = true;
 +    encoder->still_image_mode = true;
-+    // Use random_access (2) for still image — low_delay (1) prepends a
-+    // Temporal Delimiter OBU which Firefox accepts but some strict decoders
-+    // reject. random_access with intra_period_length=-1 produces the same
-+    // still_picture=1/reduced_still_picture_header=1 sequence header without TD OBU.
-+    svt_config.pred_structure      = 2;  // RANDOM_ACCESS: no TD OBU in output
++    svt_config.pred_structure      = 1;  // LOW_DELAY: only valid non-random-access value in 4.0.1
 +    svt_config.hierarchical_levels = 0;  // 2^0=1: no mini-GOP pyramid
-+    svt_config.intra_period_length = -1; // all-intra: gives still_picture=1 in seq header
++    svt_config.intra_period_length = -1; // all-intra
 +    framerate_num   = 1;
 +    framerate_denom = 1;
 +#endif
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -920,7 +951,7 @@ static heif_error read_encoder_output_pa
+@@ -912,15 +939,24 @@ static heif_error read_encoder_output_pa
+         output_packet.frameNr = output_buf->pts;
+         output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
+ 
++        // Strip Temporal Delimiter OBU (type=2) from the bitstream.
++        // AVIF spec (ISO 23000-22 §2.1) forbids TD OBUs in image items.
++        // SVT-AV1 in low-delay mode prepends one; Firefox 136+ rejects such files.
++        uint32_t strip_bytes = 0;
++        if (n >= 2 && ((data[0] >> 3) & 0xF) == 2) {
++          // TD OBU header byte + has_size_field leb128 (size=0 → 1 byte) = 2 bytes total
++          strip_bytes = 2;
++        }
++
+         encoder->output_packets.emplace_back(output_packet);
+-        encoder->output_packets.back().compressedData.resize(n);
++        encoder->output_packets.back().compressedData.resize(n - strip_bytes);
+ 
+         memcpy(encoder->output_packets.back().compressedData.data(),
+-               data, n);
++               data + strip_bytes, n - strip_bytes);
  
          /* TODO: this is a hack
           * When using
