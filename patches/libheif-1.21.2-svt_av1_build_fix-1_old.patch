@@ -1,23 +1,20 @@
-Submitted By:            Combined: Douglas R. Reno (build fix) + still image fix
+Submitted By:            Combined: Douglas R. Reno (build fix) + still image fps fix
 Date:                    2026-03-20
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + explicit still image parameters
+Origin:                  Upstream (PR #1680) + fps override for avif still image mode
 Description:             Fixes building libheif with SVT-AV1 4.0 and later,
-                         and enables proper still image mode. avif=true alone
-                         does not change pred_structure or hierarchical_levels
-                         in SVT-AV1 4.0.1 — these must be set explicitly.
-                         Without this patch SVT-AV1 uses pred=random_access,
-                         mini-gop=4, PPCS=4 even for single still images,
-                         causing higher memory usage and Firefox rejecting output.
-                         With this patch expected log output is:
-                           pred struct : all-intra
-                           mini-gop size : 1
-                           Number of PPCS : 1
-                           fps : 1 / 1
+                         and enables proper still image mode (avif=true) with
+                         correct framerate (1/1) so SVT-AV1 allocates minimal
+                         buffers (PPCS=1) instead of video-oriented structures
+                         (PPCS=4, mini-gop=4, pred=random_access).
+                         Without the fps fix, avif=true is set but SVT-AV1 still
+                         receives framerate_denom=25, causing video buffer layout
+                         and Firefox to reject the output file.
 
---- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 14:24:11.498185705 +0000
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 14:24:20.931185592 +0000
+diff -Naurp libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc libheif-1.21.2/libheif/plugins/encoder_svt.cc
+--- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-01-16 02:03:07.000000000 -0600
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 00:00:00.000000000 +0000
 @@ -838,8 +838,20 @@ static heif_error svt_start_sequence_enc
      // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
  
@@ -48,7 +45,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later,
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +871,18 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +871,14 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -58,19 +55,15 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later,
 +#if SVT_AV1_CHECK_VERSION(4, 0, 0)
 +    svt_config.avif = true;
 +    encoder->still_image_mode = true;
-+    // Force still image structure: single intra frame, no reordering buffers.
-+    // avif=true alone does not change pred_structure or hierarchical_levels in
-+    // SVT-AV1 4.0.1 — these must be set explicitly to get PPCS=1 and all-intra.
-+    svt_config.pred_structure      = 0;  // LOW_DELAY_P — no B-frames, no reorder buffer
-+    svt_config.hierarchical_levels = 0;  // flat, no mini-GOP pyramid (eliminates mini-gop=4)
-+    svt_config.intra_period_length = -1; // all-intra: every frame is a keyframe
++    // Override framerate for still image: caller passes 1/25 but avif mode
++    // needs 1/1, otherwise SVT-AV1 allocates video-oriented buffer structures.
 +    framerate_num   = 1;
 +    framerate_denom = 1;
 +#endif
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -920,7 +942,7 @@ static heif_error read_encoder_output_pa
+@@ -920,7 +938,7 @@ static heif_error read_encoder_output_pa
  
          /* TODO: this is a hack
           * When using
