@@ -18,12 +18,10 @@ class LibheifAT1212 < Formula
   depends_on "dav1d"
   depends_on "Zelatrixx/libvips/svt-av1@4.0.1"
 
-  patch do
-    url "https://www.linuxfromscratch.org/patches/blfs/svn/libheif-1.21.2-svt_av1_build_fix-1.patch"
-    sha256 "74119a51068ddab7c0d4dd58037061599d129bd2a13f12b7667bd10bc884ca66"
-  end
-
   def install
+    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-svt-av1-4.0.1-still-image.patch"
+    system "patch", "-p1", "-i", patch_file
+
     args = %W[
       -DCMAKE_INSTALL_RPATH=#{rpath}
       -DWITH_DAV1D=ON
