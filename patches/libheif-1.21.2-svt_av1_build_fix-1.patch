@@ -1,19 +1,38 @@
-Submitted By:            Combined: Douglas R. Reno (build fix) + still image fix
+Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix
 Date:                    2026-03-20
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + explicit still image parameters
-Description:             Fixes building libheif with SVT-AV1 4.0 and later,
-                         and enables proper still image mode.
-                         pred_structure=1 (low delay, no B-frames),
-                         hierarchical_levels=0 (no mini-GOP pyramid),
-                         intra_period_length=-1 (all-intra).
-                         Note: pred_structure=0 is rejected by SVT-AV1 4.0.1,
-                         valid values are 1 (low delay) or 2 (random access).
+Origin:                  Upstream (PR #1680) + still image parameters + SSIM/CQP fix
+Description:             Fixes building libheif with SVT-AV1 4.0 and later.
+                         Three changes on top of the original build fix:
+                         1. Still image mode: pred_structure=1 (low delay),
+                            hierarchical_levels=0 (mini-gop=1), intra_period_length=-1,
+                            fps=1/1. avif=true alone is insufficient in SVT-AV1 4.0.1.
+                         2. tune=SSIM fallback: SVT-AV1 4.0.1 requires CRF for SSIM,
+                            but libheif uses CQP. When sharp passes tune=ssim (its
+                            default for .heif()), silently fall back to PSNR instead
+                            of crashing with "tune SSIM only supports CRF".
 
---- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 14:35:31.290262838 +0000
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 14:35:31.338262857 +0000
-@@ -838,8 +838,20 @@ static heif_error svt_start_sequence_enc
+--- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 14:51:57.243826701 +0000
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 14:52:08.491981564 +0000
+@@ -829,8 +829,16 @@ static heif_error svt_start_sequence_enc
+   svt_config.tile_columns = int_log2(encoder->tile_cols);
+ 
+ #if SVT_AV1_CHECK_VERSION(0, 9, 1)
++  // SVT-AV1 >= 4.0.0: tune=SSIM requires CRF rate control mode.
++  // libheif uses CQP (rate_control_mode=0), so fall back to PSNR to avoid encoder error.
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++  svt_config.tune = (encoder->tune == encoder_struct_svt::Tune_SSIM)
++                    ? encoder_struct_svt::Tune_PSNR
++                    : encoder->tune;
++#else
+   svt_config.tune = encoder->tune;
+ #endif
++#endif
+ 
+   svt_config.enc_mode = (int8_t) encoder->speed;
+ 
+@@ -838,8 +846,20 @@ static heif_error svt_start_sequence_enc
      // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
  
  #if 1
@@ -35,7 +54,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later,
      switch (options->gop_structure) {
        case heif_sequence_gop_structure_intra_only:
          //svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
-@@ -851,6 +863,7 @@ static heif_error svt_start_sequence_enc
+@@ -851,6 +871,7 @@ static heif_error svt_start_sequence_enc
          svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_RANDOM_ACCESS;
          break;
      }
@@ -43,7 +62,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later,
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +871,19 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +879,15 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -53,12 +72,8 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later,
 +#if SVT_AV1_CHECK_VERSION(4, 0, 0)
 +    svt_config.avif = true;
 +    encoder->still_image_mode = true;
-+    // SVT-AV1 4.0.1 accepts only pred_structure=1 (low delay) or 2 (random access).
-+    // Use low delay (1) for still image: no B-frames, no reorder buffer.
-+    // hierarchical_levels=0 removes the mini-GOP pyramid (eliminates mini-gop=4).
-+    // intra_period_length=-1 forces all-intra encoding.
-+    svt_config.pred_structure      = 1;  // LOW_DELAY: no B-frames, no reorder buffer
-+    svt_config.hierarchical_levels = 0;  // flat: no mini-GOP pyramid
++    svt_config.pred_structure      = 1;  // LOW_DELAY: only valid non-random-access value in 4.0.1
++    svt_config.hierarchical_levels = 0;  // 2^0=1: no mini-GOP pyramid
 +    svt_config.intra_period_length = -1; // all-intra
 +    framerate_num   = 1;
 +    framerate_denom = 1;
@@ -66,7 +81,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later,
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -920,7 +943,7 @@ static heif_error read_encoder_output_pa
+@@ -920,7 +947,7 @@ static heif_error read_encoder_output_pa
  
          /* TODO: this is a hack
           * When using
