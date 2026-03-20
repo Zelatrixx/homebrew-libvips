@@ -1,20 +1,15 @@
-Submitted By:            Combined: Douglas R. Reno (build fix) + still image fps fix
-Date:                    2026-03-20
+Submitted By:            Douglas R. Reno <renodr at linuxfromscratch dot org>
+Date:                    2026-02-20
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + fps override for avif still image mode
-Description:             Fixes building libheif with SVT-AV1 4.0 and later,
-                         and enables proper still image mode (avif=true) with
-                         correct framerate (1/1) so SVT-AV1 allocates minimal
-                         buffers (PPCS=1) instead of video-oriented structures
-                         (PPCS=4, mini-gop=4, pred=random_access).
-                         Without the fps fix, avif=true is set but SVT-AV1 still
-                         receives framerate_denom=25, causing video buffer layout
-                         and Firefox to reject the output file.
+Origin:                  Upstream (PR #1680)
+Description:             Fixes building libheif with SVT-AV1-4.0 and later.
+                         Note that users need to have enabled the SVT-AV1
+                         encoder at compile time via the Command Explanations.
 
 diff -Naurp libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc libheif-1.21.2/libheif/plugins/encoder_svt.cc
 --- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-01-16 02:03:07.000000000 -0600
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 00:00:00.000000000 +0000
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-02-20 00:09:22.177940505 -0600
 @@ -838,8 +838,20 @@ static heif_error svt_start_sequence_enc
      // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
  
@@ -45,7 +40,7 @@ diff -Naurp libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc libheif-1.21.2/li
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +871,14 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +871,10 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -55,15 +50,11 @@ diff -Naurp libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc libheif-1.21.2/li
 +#if SVT_AV1_CHECK_VERSION(4, 0, 0)
 +    svt_config.avif = true;
 +    encoder->still_image_mode = true;
-+    // Override framerate for still image: caller passes 1/25 but avif mode
-+    // needs 1/1, otherwise SVT-AV1 allocates video-oriented buffer structures.
-+    framerate_num   = 1;
-+    framerate_denom = 1;
 +#endif
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -920,7 +938,7 @@ static heif_error read_encoder_output_pa
+@@ -920,7 +934,7 @@ static heif_error read_encoder_output_pa
  
          /* TODO: this is a hack
           * When using
