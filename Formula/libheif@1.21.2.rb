@@ -16,20 +16,17 @@ class LibheifAT1212 < Formula
   depends_on "webp"
   depends_on "x265"
   depends_on "dav1d"
-  depends_on "Zelatrixx/libvips/svt-av1@4.0.1"
+  depends_on "libaom"
 
   def install
-    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-svt_av1_build_fix-1.patch"
-    system "patch", "-p1", "-i", patch_file
-
     args = %W[
       -DCMAKE_INSTALL_RPATH=#{rpath}
       -DWITH_DAV1D=ON
       -DWITH_GDK_PIXBUF=OFF
       -DWITH_RAV1E=OFF
-      -DWITH_SvtEnc=ON
+      -DWITH_SvtEnc=OFF
       -DWITH_AOM_DECODER=OFF
-      -DWITH_AOM_ENCODER=OFF
+      -DWITH_AOM_ENCODER=ON
     ]
 
     system "cmake", "-S", ".", "-B", "build", *args, *std_cmake_args
