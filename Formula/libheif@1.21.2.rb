@@ -16,7 +16,7 @@ class LibheifAT1212 < Formula
   depends_on "webp"
   depends_on "x265"
   depends_on "dav1d"
-  depends_on "libaom"
+  depends_on "aom"
 
   def install
     args = %W[
