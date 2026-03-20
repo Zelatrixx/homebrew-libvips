@@ -1,21 +1,20 @@
-Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix + TD OBU fix
+Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix
 Date:                    2026-03-20
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + three additional fixes
+Origin:                  Upstream (PR #1680) + still image parameters + SSIM/CQP fix
 Description:             Fixes building libheif with SVT-AV1 4.0 and later.
                          Three changes on top of the original build fix:
-                         1. Still image mode: pred_structure=1, hierarchical_levels=0,
-                            intra_period_length=-1, fps=1/1.
-                         2. tune=SSIM fallback to PSNR under CQP mode (SVT-AV1 4.0.1
-                            requires CRF for SSIM, crashes otherwise).
-                         3. Strip Temporal Delimiter OBU from output bitstream.
-                            AVIF spec ISO 23000-22 §2.1 forbids TD OBUs in image items.
-                            SVT-AV1 in low-delay mode prepends one; Firefox 136+
-                            strictly rejects such files with "image contains errors".
+                         1. Still image mode: pred_structure=1 (low delay),
+                            hierarchical_levels=0 (mini-gop=1), intra_period_length=-1,
+                            fps=1/1. avif=true alone is insufficient in SVT-AV1 4.0.1.
+                         2. tune=SSIM fallback: SVT-AV1 4.0.1 requires CRF for SSIM,
+                            but libheif uses CQP. When sharp passes tune=ssim (its
+                            default for .heif()), silently fall back to PSNR instead
+                            of crashing with "tune SSIM only supports CRF".
 
---- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 15:10:18.737302366 +0000
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 15:10:35.470295843 +0000
+--- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-20 14:51:57.243826701 +0000
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-20 14:52:08.491981564 +0000
 @@ -829,8 +829,16 @@ static heif_error svt_start_sequence_enc
    svt_config.tile_columns = int_log2(encoder->tile_cols);
  
@@ -82,26 +81,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -912,15 +939,24 @@ static heif_error read_encoder_output_pa
-         output_packet.frameNr = output_buf->pts;
-         output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
- 
-+        // Strip Temporal Delimiter OBU (type=2) from the bitstream.
-+        // AVIF spec (ISO 23000-22 §2.1) forbids TD OBUs in image items.
-+        // SVT-AV1 in low-delay mode prepends one; Firefox 136+ rejects such files.
-+        uint32_t strip_bytes = 0;
-+        if (n >= 2 && ((data[0] >> 3) & 0xF) == 2) {
-+          // TD OBU header byte + has_size_field leb128 (size=0 → 1 byte) = 2 bytes total
-+          strip_bytes = 2;
-+        }
-+
-         encoder->output_packets.emplace_back(output_packet);
--        encoder->output_packets.back().compressedData.resize(n);
-+        encoder->output_packets.back().compressedData.resize(n - strip_bytes);
- 
-         memcpy(encoder->output_packets.back().compressedData.data(),
--               data, n);
-+               data + strip_bytes, n - strip_bytes);
+@@ -920,7 +947,7 @@ static heif_error read_encoder_output_pa
  
          /* TODO: this is a hack
           * When using
