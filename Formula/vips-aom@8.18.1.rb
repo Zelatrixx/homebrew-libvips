@@ -1,4 +1,4 @@
-class VipsAT8181 < Formula
+class VipsAomAT8181 < Formula
   desc "Image processing library"
   homepage "https://github.com/libvips/libvips"
   url "https://github.com/libvips/libvips/releases/download/v8.18.1/vips-8.18.1.tar.xz"

@@ -1,4 +1,4 @@
-class LibheifAT1212 < Formula
+class LibheifAomAT1212 < Formula
   desc "ISO/IEC 23008-12:2017 HEIF file format decoder and encoder"
   homepage "https://www.libde265.org/"
   url "https://github.com/strukturag/libheif/releases/download/v1.21.2/libheif-1.21.2.tar.gz"
