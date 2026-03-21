@@ -51,14 +51,20 @@
 -    // svt_config.avif = true;
 -    // encoder->still_image_mode = true;
 +#if SVT_AV1_CHECK_VERSION(4, 0, 0)
-+    // Proper still-image AVIF path for SVT-AV1 4.x.
-+    svt_config.avif = true;
++    // Keep still-image coding semantics for single-image AVIF items.
 +    encoder->still_image_mode = true;
 +    svt_config.pred_structure = 2;      // RANDOM_ACCESS
 +    svt_config.hierarchical_levels = 0; // no mini-GOP pyramid
 +    svt_config.intra_period_length = -1;
 +    framerate_num = 1;
 +    framerate_denom = 1;
++
++    // Firefox compatibility workaround:
++    // for odd dimensions do not enable SVT's avif flag.
++    // Even dimensions keep the native still-image AVIF mode.
++    if ((w & 1) == 0 && (h & 1) == 0) {
++      svt_config.avif = true;
++    }
 +#endif
    }
  

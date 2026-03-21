@@ -1,0 +1,135 @@
+Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix + YUV444
+Date:                    2026-03-20
+Initial Package Version: 1.21.2
+Upstream Status:         Pending
+Origin:                  Upstream (PR #1680) + three additional fixes
+Description:             Fixes building libheif with SVT-AV1 4.0 and later.
+                         Three changes on top of the original build fix:
+
+                         1. Still image mode (SVT-AV1 >= 4.0.0):
+                            avif=true, pred_structure=2 (random_access),
+                            hierarchical_levels=0, intra_period_length=-1, fps=1/1.
+
+                         2. tune=SSIM fallback to PSNR (SVT-AV1 >= 4.0.0):
+                            SVT-AV1 4.x requires CRF for tune=SSIM but libheif uses
+                            CQP. Sharp passes tune=ssim by default for .heif() calls
+                            which crashes the encoder. Fall back silently to PSNR.
+
+                         3. YUV444 by default (SVT-AV1 >= 4.0.0):
+                            SVT-AV1 4.x supports YUV444 (EbColorFormat max is YUV444).
+                            Returning heif_chroma_444 from svt_query_input_colorspace
+                            eliminates the even-dimension requirement of YUV420, so
+                            odd-sized images no longer produce a 'clap' box with
+                            fractional pixel offsets that Firefox rejects per AVIF spec.
+                            Sharp defaults to chromaSubsampling='4:4:4' for AVIF, so
+                            this matches the caller's intent. To use 4:2:0 explicitly
+                            pass chromaSubsampling:'4:2:0' in sharp avif options.
+
+--- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-21 19:35:48.208245213 +0000
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-21 19:36:07.760250711 +0000
+@@ -646,16 +646,29 @@ static void svt_set_default_parameters(v
+ void svt_query_input_colorspace(heif_colorspace* colorspace, heif_chroma* chroma)
+ {
+   *colorspace = heif_colorspace_YCbCr;
++  // SVT-AV1 >= 4.0.0 supports YUV444 (EbColorFormat max is YUV444).
++  // 4:4:4 eliminates the chroma subsampling alignment requirement (even dimensions),
++  // so odd-sized images no longer need a 'clap' box with fractional pixel offsets
++  // that Firefox rejects. Sharp defaults to chromaSubsampling='4:4:4' for AVIF,
++  // so this matches the caller's intent. Pass chromaSubsampling='4:2:0' explicitly
++  // in sharp if smaller files are preferred (at the cost of odd-dimension issues).
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++  *chroma = heif_chroma_444;
++#else
+   *chroma = heif_chroma_420;
++#endif
+ }
+ 
+ 
+ void svt_query_input_colorspace2(void* encoder_raw, heif_colorspace* colorspace, heif_chroma* chroma)
+ {
+-  //auto* encoder = (struct encoder_struct_svt*) encoder_raw;
+-
+   *colorspace = heif_colorspace_YCbCr;
++  // Same rationale as svt_query_input_colorspace above.
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++  *chroma = heif_chroma_444;
++#else
+   *chroma = heif_chroma_420;
++#endif
+ }
+ 
+ 
+@@ -829,8 +842,15 @@ static heif_error svt_start_sequence_enc
+   svt_config.tile_columns = int_log2(encoder->tile_cols);
+ 
+ #if SVT_AV1_CHECK_VERSION(0, 9, 1)
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++  // tune=SSIM requires CRF in SVT-AV1 4.x; libheif uses CQP — fall back to PSNR
++  svt_config.tune = (encoder->tune == encoder_struct_svt::Tune_SSIM)
++                    ? encoder_struct_svt::Tune_PSNR
++                    : encoder->tune;
++#else
+   svt_config.tune = encoder->tune;
+ #endif
++#endif
+ 
+   svt_config.enc_mode = (int8_t) encoder->speed;
+ 
+@@ -838,8 +858,20 @@ static heif_error svt_start_sequence_enc
+     // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
+ 
+ #if 1
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++    switch (options->gop_structure) {
++      case heif_sequence_gop_structure_intra_only:
++        //svt_config.pred_structure = 1; // LOW_DELAY
++        break;
++      case heif_sequence_gop_structure_lowdelay:
++        //svt_config.pred_structure = 1; // LOW_DELAY
++        break;
++      case heif_sequence_gop_structure_unrestricted:
++        svt_config.pred_structure = 2; // RANDOM_ACCESS
++        break;
++    }
++#else
+     // TODO: setting pref_structure to SVT_AV1_PRED_LOW_DELAY_B hangs the encoder
+-
+     switch (options->gop_structure) {
+       case heif_sequence_gop_structure_intra_only:
+         //svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
+@@ -851,6 +883,7 @@ static heif_error svt_start_sequence_enc
+         svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_RANDOM_ACCESS;
+         break;
+     }
++#endif
+ 
+     if (options->keyframe_distance_max) {
+       svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
+@@ -858,9 +891,15 @@ static heif_error svt_start_sequence_enc
+ #endif
+   }
+   else {
+-    // TODO: enable when https://gitlab.com/AOMediaCodec/SVT-AV1/-/issues/2245 is resolved
+-    // svt_config.avif = true;
+-    // encoder->still_image_mode = true;
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++    svt_config.avif = true;
++    encoder->still_image_mode = true;
++    svt_config.pred_structure      = 2;
++    svt_config.hierarchical_levels = 0;
++    svt_config.intra_period_length = -1;
++    framerate_num   = 1;
++    framerate_denom = 1;
++#endif
+   }
+ 
+   if (color_format == EB_YUV422 || bitdepth_y > 10) {
+@@ -920,7 +959,7 @@ static heif_error read_encoder_output_pa
+ 
+         /* TODO: this is a hack
+          * When using
+-         *           svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
++         *           svt_config.pred_structure = 1; // LOW_DELAY
+          * svt_av1_enc_get_packet() hangs on the second call. As a workaround, we can leave the
+          * loop when we got the image:
+          */
