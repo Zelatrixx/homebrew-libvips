@@ -1,0 +1,2 @@
+# Patches must use LF so GNU patch on Linux/macOS does not break
+patches/**/*.patch text eol=lf

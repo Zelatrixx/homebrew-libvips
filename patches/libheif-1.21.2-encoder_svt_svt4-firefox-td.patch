@@ -50,7 +50,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
  #if SVT_AV1_CHECK_VERSION(0, 9, 1)
 +#if SVT_AV1_CHECK_VERSION(4, 0, 0)
-+  // tune=SSIM requires CRF in SVT-AV1 4.x; libheif uses CQP — fall back to PSNR
++  // tune=SSIM requires CRF in SVT-AV1 4.x; libheif uses CQP - fall back to PSNR
 +  svt_config.tune = (encoder->tune == encoder_struct_svt::Tune_SSIM)
 +                    ? encoder_struct_svt::Tune_PSNR
 +                    : encoder->tune;
@@ -91,7 +91,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +883,23 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +883,22 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -117,12 +117,12 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -912,15 +951,21 @@ static heif_error read_encoder_output_pa
+@@ -912,15 +949,21 @@ static heif_error read_encoder_output_pa
          output_packet.frameNr = output_buf->pts;
          output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
  
 +        // Strip Temporal Delimiter OBU (type=2) from output bitstream.
-+        // AVIF spec (ISO 23000-22 §2.1) forbids TD OBUs in image items.
++        // AVIF spec (ISO 23000-22 section 2.1) forbids TD OBUs in image items.
 +        // SVT-AV1 in avif mode prepends one; Firefox rejects such files.
 +        // TD OBU is always 2 bytes: header byte (0x12) + size byte (0x00).
 +        uint32_t strip = (n >= 2 && ((data[0] >> 3) & 0xF) == 2) ? 2 : 0;
