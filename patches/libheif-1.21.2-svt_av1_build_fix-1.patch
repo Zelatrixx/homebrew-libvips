@@ -18,16 +18,43 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
                             items. SVT-AV1 in avif mode prepends one (2 bytes).
                             Firefox rejects such files. Strip after encode.
 
-                         4. Fix clap box fractional offset (libheif/box.cc):
-                            SVT-AV1 rounds odd dimensions up (461->462) for YUV420.
-                            libheif adds a clap box with offset=-(1/2) pixel which
-                            is non-integer - Firefox rejects per AVIF spec.
-                            Fix: expand clap visible area by 1px when diff is odd,
-                            making the offset 0 (integer).
+                         4. Round DOWN odd dimensions in svt_query_encoded_size:
+                            Rounding up (461->462) causes libheif to add a clap box
+                            with offset=-(1/2) pixel — Firefox rejects per AVIF spec.
+                            Rounding down (461->460): encoded<=input, libheif skips
+                            clap box entirely. One pixel lost on odd-sized images,
+                            imperceptible in practice.
 
 --- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-21 20:55:59.000000000 +0000
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-22 13:33:18.841166507 +0000
-@@ -829,8 +829,15 @@ static heif_error svt_start_sequence_enc
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-22 15:34:40.009724983 +0000
+@@ -666,11 +666,16 @@ void svt_query_encoded_size(void* encode
+ 
+   // SVT-AV1 (as of version 1.2.1) can only create image sizes matching the chroma format. Add padding if necessary.
+ 
++  // Round DOWN for odd dimensions instead of up.
++  // Rounding up (input+1) causes libheif to add a clap box with offset=-(1/2)
++  // pixel — a non-integer offset that Firefox rejects per AVIF spec ISO 23000-22.
++  // Rounding down means encoded<=input: libheif skips the clap box entirely.
++  // The single lost pixel on odd-sized images is imperceptible.
+   if (input_width < 64) {
+     *encoded_width = 64;
+   }
+   else if (encoder->chroma == heif_chroma_420 && (input_width & 1) == 1) {
+-    *encoded_width = input_width + 1;
++    *encoded_width = input_width - 1;
+   }
+   else {
+     *encoded_width = input_width;
+@@ -680,7 +685,7 @@ void svt_query_encoded_size(void* encode
+     *encoded_height = 64;
+   }
+   else if (encoder->chroma != heif_chroma_444 && (input_height & 1) == 1) {
+-    *encoded_height = input_height + 1;
++    *encoded_height = input_height - 1;
+   }
+   else {
+     *encoded_height = input_height;
+@@ -829,8 +834,15 @@ static heif_error svt_start_sequence_enc
    svt_config.tile_columns = int_log2(encoder->tile_cols);
  
  #if SVT_AV1_CHECK_VERSION(0, 9, 1)
@@ -43,7 +70,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
    svt_config.enc_mode = (int8_t) encoder->speed;
  
-@@ -838,8 +845,20 @@ static heif_error svt_start_sequence_enc
+@@ -838,8 +850,20 @@ static heif_error svt_start_sequence_enc
      // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
  
  #if 1
@@ -65,7 +92,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
      switch (options->gop_structure) {
        case heif_sequence_gop_structure_intra_only:
          //svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
-@@ -851,6 +870,7 @@ static heif_error svt_start_sequence_enc
+@@ -851,6 +875,7 @@ static heif_error svt_start_sequence_enc
          svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_RANDOM_ACCESS;
          break;
      }
@@ -73,7 +100,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +878,13 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +883,13 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -90,7 +117,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -912,15 +936,21 @@ static heif_error read_encoder_output_pa
+@@ -912,15 +941,21 @@ static heif_error read_encoder_output_pa
          output_packet.frameNr = output_buf->pts;
          output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
  
@@ -115,19 +142,3 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
           * svt_av1_enc_get_packet() hangs on the second call. As a workaround, we can leave the
           * loop when we got the image:
           */
-
-diff -Naurp libheif-1.21.2.orig/libheif/box.cc libheif-1.21.2/libheif/box.cc
---- libheif-1.21.2.orig/libheif/box.cc
-+++ libheif-1.21.2/libheif/box.cc
-@@ -3636,6 +3636,13 @@
-   assert(image_width >= clap_width);
-   assert(image_height >= clap_height);
-+  if ((image_width - clap_width) % 2 != 0 && clap_width + 1 <= image_width) {
-+    clap_width += 1;
-+  }
-+  if ((image_height - clap_height) % 2 != 0 && clap_height + 1 <= image_height) {
-+    clap_height += 1;
-+  }
-+
-   m_clean_aperture_width = Fraction(clap_width, 1U);
-   m_clean_aperture_height = Fraction(clap_height, 1U);
