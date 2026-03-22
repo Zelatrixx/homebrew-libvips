@@ -1,4 +1,4 @@
-class VipsAT8181 < Formula
+class VipsSvtDav1dAT8181 < Formula
   desc "Image processing library"
   homepage "https://github.com/libvips/libvips"
   url "https://github.com/libvips/libvips/releases/download/v8.18.1/vips-8.18.1.tar.xz"
@@ -27,7 +27,7 @@ class VipsAT8181 < Formula
   depends_on "jpeg-xl"
   depends_on "libarchive"
   depends_on "libexif"
-  depends_on "Zelatrixx/libvips/libheif@1.21.2"
+  depends_on "Zelatrixx/libvips/libheif-svt-dav1d@1.21.2"
   depends_on "libimagequant"
   depends_on "libmatio"
   depends_on "libpng"

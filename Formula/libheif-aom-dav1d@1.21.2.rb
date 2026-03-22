@@ -1,4 +1,4 @@
-class LibheifAT1212 < Formula
+class LibheifAomDav1dAT1212 < Formula
   desc "ISO/IEC 23008-12:2017 HEIF file format decoder and encoder"
   homepage "https://www.libde265.org/"
   url "https://github.com/strukturag/libheif/releases/download/v1.21.2/libheif-1.21.2.tar.gz"
@@ -16,20 +16,17 @@ class LibheifAT1212 < Formula
   depends_on "webp"
   depends_on "x265"
   depends_on "dav1d"
-  depends_on "Zelatrixx/libvips/svt-av1@4.0.1"
 
   def install
-    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-encoder_svt_svt4-firefox-td.patch"
-    system "patch", "-p1", "-i", patch_file
 
     args = %W[
       -DCMAKE_INSTALL_RPATH=#{rpath}
       -DWITH_DAV1D=ON
       -DWITH_GDK_PIXBUF=OFF
       -DWITH_RAV1E=OFF
-      -DWITH_SvtEnc=ON
+      -DWITH_SvtEnc=OFF
       -DWITH_AOM_DECODER=OFF
-      -DWITH_AOM_ENCODER=OFF
+      -DWITH_AOM_ENCODER=ON
     ]
 
     system "cmake", "-S", ".", "-B", "build", *args, *std_cmake_args
