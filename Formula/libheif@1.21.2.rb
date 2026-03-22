@@ -19,7 +19,7 @@ class LibheifAT1212 < Formula
   depends_on "Zelatrixx/libvips/svt-av1@4.0.1"
 
   def install
-    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-svt_av1_build_fix-1.patch"
+    patch_file = Pathname.new(__dir__).parent/"patches"/"libheif-1.21.2-encoder_svt_svt4-firefox-td.patch"
     system "patch", "-p1", "-i", patch_file
 
     args = %W[

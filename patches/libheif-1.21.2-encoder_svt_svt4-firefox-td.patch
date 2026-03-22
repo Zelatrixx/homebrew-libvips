@@ -1,0 +1,144 @@
+Submitted By:            Combined: Douglas R. Reno (build fix) + SVT 4.x + Firefox odd-size + TD OBU + clap
+Date:                    2026-03-22
+Initial Package Version: 1.21.2
+Upstream Status:         Pending
+Origin:                  Upstream (PR #1680) + local fixes
+Description:             Fixes building libheif with SVT-AV1 4.0 and later.
+
+                         1. Still image mode (SVT-AV1 >= 4.0.0):
+                            intra_period_length=-1, pred_structure, hierarchical_levels,
+                            fps=1/1; svt_config.avif=true only when w/h are even
+                            (Firefox workaround for odd dimensions).
+
+                         2. tune=SSIM fallback to PSNR (SVT-AV1 >= 4.0.0).
+
+                         3. Strip Temporal Delimiter OBU from output bitstream (AVIF §2.1).
+
+                         4. Round DOWN odd dimensions in svt_query_encoded_size (clap / Firefox).
+
+--- a/libheif/plugins/encoder_svt.cc
++++ b/libheif/plugins/encoder_svt.cc
+@@ -666,11 +666,16 @@ void svt_query_encoded_size(void* encode
+ 
+   // SVT-AV1 (as of version 1.2.1) can only create image sizes matching the chroma format. Add padding if necessary.
+ 
++  // Round DOWN for odd dimensions instead of up.
++  // Rounding up (input+1) causes libheif to add a clap box with offset=-(1/2)
++  // pixel — a non-integer offset that Firefox rejects per AVIF spec ISO 23000-22.
++  // Rounding down means encoded<=input: libheif skips the clap box entirely.
++  // The single lost pixel on odd-sized images is imperceptible.
+   if (input_width < 64) {
+     *encoded_width = 64;
+   }
+   else if (encoder->chroma == heif_chroma_420 && (input_width & 1) == 1) {
+-    *encoded_width = input_width + 1;
++    *encoded_width = input_width - 1;
+   }
+   else {
+     *encoded_width = input_width;
+@@ -680,7 +685,7 @@ void svt_query_encoded_size(void* encode
+     *encoded_height = 64;
+   }
+   else if (encoder->chroma != heif_chroma_444 && (input_height & 1) == 1) {
+-    *encoded_height = input_height + 1;
++    *encoded_height = input_height - 1;
+   }
+   else {
+     *encoded_height = input_height;
+@@ -829,8 +834,15 @@ static heif_error svt_start_sequence_enc
+   svt_config.tile_columns = int_log2(encoder->tile_cols);
+ 
+ #if SVT_AV1_CHECK_VERSION(0, 9, 1)
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++  // tune=SSIM requires CRF in SVT-AV1 4.x; libheif uses CQP — fall back to PSNR
++  svt_config.tune = (encoder->tune == encoder_struct_svt::Tune_SSIM)
++                    ? encoder_struct_svt::Tune_PSNR
++                    : encoder->tune;
++#else
+   svt_config.tune = encoder->tune;
+ #endif
++#endif
+ 
+   svt_config.enc_mode = (int8_t) encoder->speed;
+ 
+@@ -838,8 +850,20 @@ static heif_error svt_start_sequence_enc
+     // svt_config.force_key_frames = true; TODO: this does not seem to work (see all [1])
+ 
+ #if 1
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++    switch (options->gop_structure) {
++      case heif_sequence_gop_structure_intra_only:
++        //svt_config.pred_structure = 1; // LOW_DELAY
++        break;
++      case heif_sequence_gop_structure_lowdelay:
++        //svt_config.pred_structure = 1; // LOW_DELAY
++        break;
++      case heif_sequence_gop_structure_unrestricted:
++        svt_config.pred_structure = 2; // RANDOM_ACCESS
++        break;
++    }
++#else
+     // TODO: setting pref_structure to SVT_AV1_PRED_LOW_DELAY_B hangs the encoder
+-
+     switch (options->gop_structure) {
+       case heif_sequence_gop_structure_intra_only:
+         //svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
+@@ -851,6 +875,7 @@ static heif_error svt_start_sequence_enc
+         svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_RANDOM_ACCESS;
+         break;
+     }
++#endif
+ 
+     if (options->keyframe_distance_max) {
+       svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
+@@ -858,9 +883,23 @@ static heif_error svt_start_sequence_enc
+ #endif
+   }
+   else {
+-    // TODO: enable when https://gitlab.com/AOMediaCodec/SVT-AV1/-/issues/2245 is resolved
+-    // svt_config.avif = true;
+-    // encoder->still_image_mode = true;
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++    // Keep still-image coding semantics for single-image AVIF items.
++    encoder->still_image_mode = true;
++    svt_config.pred_structure = 2;      // RANDOM_ACCESS
++    svt_config.hierarchical_levels = 0; // no mini-GOP pyramid
++    svt_config.intra_period_length = -1;
++    framerate_num = 1;
++    framerate_denom = 1;
++
++    // Firefox compatibility workaround:
++    // for odd dimensions do not enable SVT's avif flag.
++    // Even dimensions keep the native still-image AVIF mode.
++    if ((w & 1) == 0 && (h & 1) == 0) {
++      svt_config.avif = true;
++    }
++#endif
+   }
+ 
+   if (color_format == EB_YUV422 || bitdepth_y > 10) {
+@@ -912,15 +951,21 @@ static heif_error read_encoder_output_pa
+         output_packet.frameNr = output_buf->pts;
+         output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
+ 
++        // Strip Temporal Delimiter OBU (type=2) from output bitstream.
++        // AVIF spec (ISO 23000-22 §2.1) forbids TD OBUs in image items.
++        // SVT-AV1 in avif mode prepends one; Firefox rejects such files.
++        // TD OBU is always 2 bytes: header byte (0x12) + size byte (0x00).
++        uint32_t strip = (n >= 2 && ((data[0] >> 3) & 0xF) == 2) ? 2 : 0;
++
+         encoder->output_packets.emplace_back(output_packet);
+-        encoder->output_packets.back().compressedData.resize(n);
++        encoder->output_packets.back().compressedData.resize(n - strip);
+ 
+         memcpy(encoder->output_packets.back().compressedData.data(),
+-               data, n);
++               data + strip, n - strip);
+ 
+         /* TODO: this is a hack
+          * When using
+-         *           svt_config.pred_structure = SvtAv1PredStructure::SVT_AV1_PRED_LOW_DELAY_B;
++         *           svt_config.pred_structure = 1; // LOW_DELAY
+          * svt_av1_enc_get_packet() hangs on the second call. As a workaround, we can leave the
+          * loop when we got the image:
+          */
