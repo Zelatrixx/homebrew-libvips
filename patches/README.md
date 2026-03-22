@@ -4,7 +4,7 @@
 
 Applied by `Formula/libheif@1.21.2.rb`. Supersedes `libheif-1.21.2-svt_av1_build_fix-1.patch` with one extra change:
 
-- **Firefox + odd dimensions:** for single-image AVIF, `svt_config.avif = true` only when both luma `w` and `h` are even; still-image parameters (`pred_structure`, `hierarchical_levels`, `intra_period_length`, fps 1/1) stay enabled for all sizes.
+- **Firefox:** `svt_config.avif` is **never** set to `true` (SVT’s AVIF mode often breaks Firefox even for even dimensions). Still-image parameters (`pred_structure`, `hierarchical_levels`, `intra_period_length`, fps 1/1) stay enabled.
 
 Also includes: round-down odd sizes in `svt_query_encoded_size`, SVT 4.x tune/GOP fixes, strip leading Temporal Delimiter OBU.
 

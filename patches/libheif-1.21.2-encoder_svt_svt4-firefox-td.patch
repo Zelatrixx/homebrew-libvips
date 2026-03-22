@@ -7,8 +7,8 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
 
                          1. Still image mode (SVT-AV1 >= 4.0.0):
                             intra_period_length=-1, pred_structure, hierarchical_levels,
-                            fps=1/1; svt_config.avif=true only when w/h are even
-                            (Firefox workaround for odd dimensions).
+                            fps=1/1. Do NOT set svt_config.avif (Firefox often fails even
+                            when w/h are even if avif=true).
 
                          2. tune=SSIM fallback to PSNR (SVT-AV1 >= 4.0.0).
 
@@ -91,7 +91,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +883,23 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +883,19 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -108,23 +108,19 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
 +    framerate_num = 1;
 +    framerate_denom = 1;
 +
-+    // Firefox compatibility workaround:
-+    // for odd dimensions do not enable SVT's avif flag.
-+    // Even dimensions keep the native still-image AVIF mode.
-+    if ((w & 1) == 0 && (h & 1) == 0) {
-+      svt_config.avif = true;
-+    }
++    // Do not set svt_config.avif (leave false). Enabling it breaks Firefox playback
++    // for many outputs (even with even dimensions); still-image params above are enough.
 +#endif
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -912,15 +950,21 @@ static heif_error read_encoder_output_pa
+@@ -912,15 +946,21 @@ static heif_error read_encoder_output_pa
          output_packet.frameNr = output_buf->pts;
          output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
  
 +        // Strip Temporal Delimiter OBU (type=2) from output bitstream.
 +        // AVIF spec (ISO 23000-22 section 2.1) forbids TD OBUs in image items.
-+        // SVT-AV1 in avif mode prepends one; Firefox rejects such files.
++        // Some SVT outputs prepend one; Firefox rejects TD in image items.
 +        // TD OBU is always 2 bytes: header byte (0x12) + size byte (0x00).
 +        uint32_t strip = (n >= 2 && ((data[0] >> 3) & 0xF) == 2) ? 2 : 0;
 +
