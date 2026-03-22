@@ -21,7 +21,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
                          4. Fix clap box fractional offset (libheif/box.cc):
                             SVT-AV1 rounds odd dimensions up (461->462) for YUV420.
                             libheif adds a clap box with offset=-(1/2) pixel which
-                            is non-integer — Firefox rejects per AVIF spec.
+                            is non-integer - Firefox rejects per AVIF spec.
                             Fix: expand clap visible area by 1px when diff is odd,
                             making the offset 0 (integer).
 
@@ -119,7 +119,9 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
 diff -Naurp libheif-1.21.2.orig/libheif/box.cc libheif-1.21.2/libheif/box.cc
 --- libheif-1.21.2.orig/libheif/box.cc
 +++ libheif-1.21.2/libheif/box.cc
-@@ -3636,6 +3636,16 @@ void Box_clap::set(uint32_t clap_width, uint32_t clap_height,
+@@ -3633,12 +3633,22 @@ void Box_clap::set(uint32_t clap_width, uint32_t clap_height,
+                    uint32_t image_width, uint32_t image_height)
+ {
    assert(image_width >= clap_width);
    assert(image_height >= clap_height);
  
@@ -137,3 +139,6 @@ diff -Naurp libheif-1.21.2.orig/libheif/box.cc libheif-1.21.2/libheif/box.cc
    m_clean_aperture_width = Fraction(clap_width, 1U);
    m_clean_aperture_height = Fraction(clap_height, 1U);
  
+   m_horizontal_offset = Fraction(-(int32_t) (image_width - clap_width), 2);
+   m_vertical_offset = Fraction(-(int32_t) (image_height - clap_height), 2);
+ }
