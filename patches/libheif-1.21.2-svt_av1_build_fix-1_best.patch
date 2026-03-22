@@ -1,29 +1,31 @@
-Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix + clap fix
+Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix + clap fix + TD OBU fix
 Date:                    2026-03-21
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + three additional fixes
+Origin:                  Upstream (PR #1680) + four additional fixes
 Description:             Fixes building libheif with SVT-AV1 4.0 and later.
-                         Three changes on top of the original build fix:
+                         Four changes on top of the original build fix:
 
                          1. Still image mode (SVT-AV1 >= 4.0.0):
                             avif=true, intra_period_length=-1, fps=1/1.
 
                          2. tune=SSIM fallback to PSNR (SVT-AV1 >= 4.0.0):
                             SVT-AV1 4.x requires CRF for tune=SSIM but libheif uses
-                            CQP. Sharp passes tune=ssim by default for .heif() calls
-                            which crashes the encoder. Fall back silently to PSNR.
+                            CQP. Sharp passes tune=ssim by default which crashes the
+                            encoder. Fall back silently to PSNR.
 
-                         3. Set query_encoded_size to nullptr in plugin table (like AOM).
-                            SVT-AV1 rounds odd dimensions up for YUV420 subsampling,
-                            causing libheif to add a clap box with offset=-(1/2) pixel
-                            which Firefox rejects per AVIF spec. AOM avoids this by
-                            not registering query_encoded_size at all (nullptr).
-                            Internal calls to svt_query_encoded_size remain intact for
-                            correct padding of image data passed to the encoder.
+                         3. query_encoded_size=nullptr in plugin table (like AOM):
+                            Prevents libheif from adding a clap box with fractional
+                            pixel offsets for odd-dimension images. Internal calls to
+                            svt_query_encoded_size remain for correct encoder padding.
 
---- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-21 20:55:59.688047039 +0000
-+++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-21 20:56:17.634046953 +0000
+                         4. Strip Temporal Delimiter OBU from output bitstream:
+                            AVIF spec (ISO 23000-22 §2.1) forbids TD OBUs in image
+                            items. SVT-AV1 in avif mode prepends one (2 bytes: 0x12
+                            0x00). Firefox rejects such files. Strip it after encode.
+
+--- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-21 20:55:59.000000000 +0000
++++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-22 13:17:36.021317508 +0000
 @@ -829,8 +829,15 @@ static heif_error svt_start_sequence_enc
    svt_config.tile_columns = int_log2(encoder->tile_cols);
  
@@ -87,7 +89,23 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -920,7 +944,7 @@ static heif_error read_encoder_output_pa
+@@ -912,15 +936,21 @@ static heif_error read_encoder_output_pa
+         output_packet.frameNr = output_buf->pts;
+         output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
+ 
++        // Strip Temporal Delimiter OBU (type=2) from output bitstream.
++        // AVIF spec (ISO 23000-22 §2.1) forbids TD OBUs in image items.
++        // SVT-AV1 in avif mode prepends one; Firefox rejects such files.
++        // TD OBU is always 2 bytes: header byte (0x12) + size byte (0x00).
++        uint32_t strip = (n >= 2 && ((data[0] >> 3) & 0xF) == 2) ? 2 : 0;
++
+         encoder->output_packets.emplace_back(output_packet);
+-        encoder->output_packets.back().compressedData.resize(n);
++        encoder->output_packets.back().compressedData.resize(n - strip);
+ 
+         memcpy(encoder->output_packets.back().compressedData.data(),
+-               data, n);
++               data + strip, n - strip);
  
          /* TODO: this is a hack
           * When using
@@ -96,7 +114,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
           * svt_av1_enc_get_packet() hangs on the second call. As a workaround, we can leave the
           * loop when we got the image:
           */
-@@ -1234,7 +1258,7 @@ static const heif_encoder_plugin encoder
+@@ -1234,7 +1264,7 @@ static const heif_encoder_plugin encoder
                             /* encode_image */ svt_encode_image,
                             /* get_compressed_data */ svt_get_compressed_data,
                             /* query_input_colorspace (v2) */ svt_query_input_colorspace2,
