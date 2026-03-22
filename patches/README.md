@@ -8,6 +8,8 @@ Applied by `Formula/libheif@1.21.2.rb`. Supersedes `libheif-1.21.2-svt_av1_build
 
 Also includes: round-down odd sizes in `svt_query_encoded_size`, SVT 4.x tune/GOP fixes, strip leading Temporal Delimiter OBU.
 
+**SVT-AV1 4.x:** `hierarchical_levels` must be **2–5** (not `0`); the patch uses **`2`** (minimum), otherwise the encoder aborts with `Only hierarchical levels 2-5 is currently supported`.
+
 Uses paths `a/libheif/plugins/encoder_svt.cc` (works with `patch -p1` from extracted tarball root).
 
 ## `libheif-1.21.2-svt_av1_build_fix-1.patch`

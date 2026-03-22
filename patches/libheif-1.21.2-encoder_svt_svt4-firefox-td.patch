@@ -91,7 +91,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
  
      if (options->keyframe_distance_max) {
        svt_config.intra_period_length = options->keyframe_distance_max; // TODO -1 ?
-@@ -858,9 +883,22 @@ static heif_error svt_start_sequence_enc
+@@ -858,9 +883,23 @@ static heif_error svt_start_sequence_enc
  #endif
    }
    else {
@@ -102,7 +102,8 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
 +    // Keep still-image coding semantics for single-image AVIF items.
 +    encoder->still_image_mode = true;
 +    svt_config.pred_structure = 2;      // RANDOM_ACCESS
-+    svt_config.hierarchical_levels = 0; // no mini-GOP pyramid
++    // SVT-AV1 4.x rejects hierarchical_levels=0 ("Only hierarchical levels 2-5").
++    svt_config.hierarchical_levels = 2; // minimum allowed; still all-intra with intra_period_length=-1
 +    svt_config.intra_period_length = -1;
 +    framerate_num = 1;
 +    framerate_denom = 1;
@@ -117,7 +118,7 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
    }
  
    if (color_format == EB_YUV422 || bitdepth_y > 10) {
-@@ -912,15 +949,21 @@ static heif_error read_encoder_output_pa
+@@ -912,15 +950,21 @@ static heif_error read_encoder_output_pa
          output_packet.frameNr = output_buf->pts;
          output_packet.is_keyframe = (output_buf->pic_type == EbAv1PictureType::EB_AV1_KEY_PICTURE);
  
