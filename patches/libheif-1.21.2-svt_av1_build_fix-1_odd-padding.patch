@@ -1,8 +1,8 @@
 Submitted By:            Combined: Douglas R. Reno (build fix) + still image + tune fix + TD OBU fix + clap fix
-Date:                    2026-03-21
+Date:                    2026-03-22
 Initial Package Version: 1.21.2
 Upstream Status:         Pending
-Origin:                  Upstream (PR #1680) + fixes
+Origin:                  Upstream (PR #1680) + four additional fixes
 Description:             Fixes building libheif with SVT-AV1 4.0 and later.
                          Four changes on top of the original build fix:
 
@@ -18,13 +18,12 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
                             items. SVT-AV1 in avif mode prepends one (2 bytes).
                             Firefox rejects such files. Strip after encode.
 
-                         4. Fix clap box fractional offset (box.cc):
-                            SVT-AV1 rounds odd dimensions up (461→462) for YUV420.
+                         4. Fix clap box fractional offset (libheif/box.cc):
+                            SVT-AV1 rounds odd dimensions up (461->462) for YUV420.
                             libheif adds a clap box with offset=-(1/2) pixel which
                             is non-integer — Firefox rejects per AVIF spec.
                             Fix: expand clap visible area by 1px when diff is odd,
-                            making the offset 0 (integer). One pixel of padding
-                            becomes visible but this is imperceptible.
+                            making the offset 0 (integer).
 
 --- libheif-1.21.2.orig/libheif/plugins/encoder_svt.cc	2026-03-21 20:55:59.000000000 +0000
 +++ libheif-1.21.2/libheif/plugins/encoder_svt.cc	2026-03-22 13:33:18.841166507 +0000
@@ -120,18 +119,14 @@ Description:             Fixes building libheif with SVT-AV1 4.0 and later.
 diff -Naurp libheif-1.21.2.orig/libheif/box.cc libheif-1.21.2/libheif/box.cc
 --- libheif-1.21.2.orig/libheif/box.cc
 +++ libheif-1.21.2/libheif/box.cc
-@@ -3633,6 +3633,18 @@ void Box_clap::set(uint32_t clap_width, uint32_t clap_height,
+@@ -3636,6 +3636,16 @@ void Box_clap::set(uint32_t clap_width, uint32_t clap_height,
    assert(image_width >= clap_width);
    assert(image_height >= clap_height);
  
-+  // The clap offset is computed as (image_size - clap_size) / 2.
++  // The clap offset is (image_size - clap_size) / 2.
 +  // If the difference is odd the result is a non-integer fraction (e.g. -1/2).
-+  // Firefox and other strict AVIF decoders reject files with fractional clap
-+  // offsets per ISO 23000-22 §2. This happens when SVT-AV1 rounds an odd input
-+  // dimension up by 1 for YUV420 chroma subsampling alignment.
-+  // Fix: if the difference is odd, expand clap_width/height by 1 so that
-+  // (image_size - clap_size) is even and the division by 2 yields an integer.
-+  // The extra pixel is within the encoded area and imperceptible.
++  // Firefox rejects files with fractional clap offsets per ISO 23000-22.
++  // Fix: expand clap size by 1 when diff is odd so division by 2 is exact.
 +  if ((image_width - clap_width) % 2 != 0 && clap_width + 1 <= image_width) {
 +    clap_width += 1;
 +  }
